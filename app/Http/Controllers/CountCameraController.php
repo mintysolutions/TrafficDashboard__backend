@@ -29,9 +29,8 @@ class CountCameraController extends Controller
 
         // Find the camera by cam_id
         $camera = CountCamManagement::find($request->cam_id);
-
         // Retrieve traffic data by filtering cam_name and cam_ip
-        $trafficData = CameraTraffic::where('cam_name', $camera->cam_name)
+        $trafficData = CameraTraffic::where('cam_name', $camera->cam_name)->where('cam_ip', $camera->cam_ip)
             ->where('cam_ip', $camera->cam_ip)
             ->get();
 
