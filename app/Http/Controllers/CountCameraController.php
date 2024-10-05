@@ -85,6 +85,46 @@ class CountCameraController extends Controller
         ], 200);
     }
 
+
+    public function getAllCameraStats(Request $request)
+    {
+        // Get optional start and end time from the request
+        $startTime = $request->query('start');
+        $endTime = $request->query('end');
+        $cameras = CountCamManagement::all();
+        $allCameraStats = [];
+        foreach ($cameras as $camera) {
+            $query = CameraTraffic::where('cam_ip', $camera->cam_ip);
+            if ($startTime) {
+                $query->where('time', '>=', $startTime);
+            }
+            if ($endTime) {
+                $query->where('time', '<=', $endTime);
+            }
+            $stats = $query->select(
+                DB::raw('SUM(car_count) as total_cars'),
+                DB::raw('SUM(bus_count) as total_buses'),
+                DB::raw('SUM(truck_count) as total_trucks'),
+                DB::raw('SUM(human_count) as total_humans'),
+                DB::raw('SUM(bike_count) as total_bikes'),
+                DB::raw('SUM(total_count) as total_objects')
+            )->first();
+            $allCameraStats[] = [
+                'camera_name' => $camera->cam_name,
+                'camera_ip' => $camera->cam_ip,
+                'total_cars' => $stats->total_cars ?? 0,
+                'total_buses' => $stats->total_buses ?? 0,
+                'total_trucks' => $stats->total_trucks ?? 0,
+                'total_humans' => $stats->total_humans ?? 0,
+                'total_bikes' => $stats->total_bikes ?? 0,
+                'total_objects' => $stats->total_objects ?? 0,
+            ];
+        }
+
+        // Return the summarized statistics as a JSON response
+        return response()->json($allCameraStats, 200);
+    }
+
     public function getPeakHourAndCameraStats(Request $request)
     {
         // Fetch all unique scenarios
@@ -95,28 +135,30 @@ class CountCameraController extends Controller
         // Prepare the array to store peak hours data
         $peakHoursData = [];
 
-        // For each scenario, calculate peak hour and total_objects
+        // For each scenario, calculate the hour with the highest total_objects
         foreach ($scenarios as $scenario) {
-            $scenarioTraffic = CameraTraffic::where('scenario_name', $scenario)
-                ->select(
-                    DB::raw('HOUR(time) as hour'),
-                    DB::raw('SUM(total_count) as total_objects')
-                )
-                ->groupBy(DB::raw('HOUR(time)'))
-                ->orderBy('total_objects', 'desc')  // Order by total_objects to get the peak hour
-                ->get();
 
-            // Find the peak hour and total objects for this scenario
-            $peakHour = $scenarioTraffic->first();
+            $scenarioPeakTraffic = CameraTraffic::where('scenario_name', $scenario)
+                ->orderBy('total_count', 'desc') // Order by total_objects to get the peak hour
+                ->first(); // Get the record with the highest total_objects
 
-            // Store the peak hour data
-            if ($peakHour) {
-                $peakHoursData[] = [
-                    'scenario' => $scenario,
-                    'hour' => $peakHour->hour,
-                    'total_objects' => $peakHour->total_objects,
-                ];
-            }
+
+            // Find the traffic record with the maximum total_count for each scenario
+            // $scenarioTraffic = CameraTraffic::where('scenario_name', $scenario)
+            //     ->select(
+            //         'time',  // We need the time field for the datetime
+            //         DB::raw('HOUR(time) as hour'),
+            //         DB::raw('SUM(total_count) as total_objects')
+            //     )
+            //     ->groupBy(DB::raw('HOUR(time)'))
+            //     ->orderBy('total_objects', 'desc')  // Order by total_objects to get the peak hour
+            //     ->get();
+
+            $peakHoursData[] = [
+                'scenario' => $scenario,
+                'total_count' => $scenarioPeakTraffic->total_count,
+                'datetime' => $scenarioPeakTraffic->time, // Include the time field as datetime
+            ];
         }
 
         // Total objects grouped by camera (cam_ip)
@@ -141,4 +183,5 @@ class CountCameraController extends Controller
             'cameras' => $formattedCameraObjects
         ], 200);
     }
+
 }
