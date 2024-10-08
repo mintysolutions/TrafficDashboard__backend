@@ -14,7 +14,7 @@ class CameraTrafficSeeder extends Seeder
         $faker = Faker::create();
 
         // Define the three specific scenario names
-        $scenarioNames = ['Scenario 1', 'Scenario 2', 'Scenario 3'];
+        $scenarioNames = ['Scenario 1', 'Scenario 2', 'Scenario 3', 'Scenario 4'];
 
         // Get all cameras from the count_cam_management table
         $cameras = CountCamManagement::all();
@@ -22,7 +22,7 @@ class CameraTrafficSeeder extends Seeder
         // Loop through each camera and generate random traffic data
         foreach ($cameras as $camera) {
             // Generate 10 to 20 traffic records for each camera
-            foreach (range(1, rand(10, 20)) as $index) {
+            foreach (range(1, rand(100, 200)) as $index) {
                 CameraTraffic::create([
                     'cam_name' => $camera->cam_name,
                     'cam_ip' => $camera->cam_ip,

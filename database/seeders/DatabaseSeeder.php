@@ -23,6 +23,10 @@ class DatabaseSeeder extends Seeder
         $this->call([
             CountCamManagementSeeder::class,
             CameraTrafficSeeder::class,
+            SpeedCamManagementSeeder::class,
+            SpeedTrafficSeeder::class,
+            HeightCamManagementSeeder::class,
+            HeightTrafficSeeder::class
         ]);
     }
 }

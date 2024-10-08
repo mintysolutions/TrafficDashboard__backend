@@ -39,32 +39,30 @@ class CountCameraController extends Controller
     }
 
     // Fetch stats for the selected camera
-    public function getCameraStats($id, Request $request)
+
+    public function getCameraStats(Request $request, $cameraId)
     {
-        // Validate if the camera exists
-        $camera = CountCamManagement::find($id);
+        // Validate that the camera exists
+        $camera = CountCamManagement::find($cameraId);
         if (!$camera) {
-            return response()->json(['message' => 'Camera not found'], 404);
+            return response()->json(['error' => 'Camera not found'], 404);
         }
 
         // Get optional start and end time from the request
         $startTime = $request->query('start');
         $endTime = $request->query('end');
 
-        // Query for traffic data filtered by camera's cam_name and cam_ip
+        // Initialize query for camera traffic data filtering by camera name, IP, and optional date range
         $query = CameraTraffic::where('cam_name', $camera->cam_name)
             ->where('cam_ip', $camera->cam_ip);
 
-        // Apply date range filter if provided
-        if ($startTime) {
-            $query->where('time', '>=', $startTime);
-        }
-        if ($endTime) {
-            $query->where('time', '<=', $endTime);
+        // Apply date range filter if start and end times are provided
+        if ($startTime && $endTime) {
+            $query->whereBetween('time', [$startTime, $endTime]);
         }
 
-        // Sum the relevant fields
-        $stats = $query->select(
+        // Sum of all counts (car, bus, truck, human, bike, total) for the selected camera and date range
+        $totals = $query->select(
             DB::raw('SUM(car_count) as total_cars'),
             DB::raw('SUM(bus_count) as total_buses'),
             DB::raw('SUM(truck_count) as total_trucks'),
@@ -73,115 +71,103 @@ class CountCameraController extends Controller
             DB::raw('SUM(total_count) as total_objects')
         )->first();
 
-        // Return the summarized statistics as a JSON response
-        return response()->json([
-            'camera' => $camera->cam_name,
-            'total_cars' => $stats->total_cars ?? 0,
-            'total_buses' => $stats->total_buses ?? 0,
-            'total_trucks' => $stats->total_trucks ?? 0,
-            'total_humans' => $stats->total_humans ?? 0,
-            'total_bikes' => $stats->total_bikes ?? 0,
-            'total_objects' => $stats->total_objects ?? 0,
-        ], 200);
-    }
-
-
-    public function getAllCameraStats(Request $request)
-    {
-        // Get optional start and end time from the request
-        $startTime = $request->query('start');
-        $endTime = $request->query('end');
-        $cameras = CountCamManagement::all();
-        $allCameraStats = [];
-        foreach ($cameras as $camera) {
-            $query = CameraTraffic::where('cam_ip', $camera->cam_ip);
-            if ($startTime) {
-                $query->where('time', '>=', $startTime);
-            }
-            if ($endTime) {
-                $query->where('time', '<=', $endTime);
-            }
-            $stats = $query->select(
-                DB::raw('SUM(car_count) as total_cars'),
-                DB::raw('SUM(bus_count) as total_buses'),
-                DB::raw('SUM(truck_count) as total_trucks'),
-                DB::raw('SUM(human_count) as total_humans'),
-                DB::raw('SUM(bike_count) as total_bikes'),
-                DB::raw('SUM(total_count) as total_objects')
-            )->first();
-            $allCameraStats[] = [
-                'camera_name' => $camera->cam_name,
-                'camera_ip' => $camera->cam_ip,
-                'total_cars' => $stats->total_cars ?? 0,
-                'total_buses' => $stats->total_buses ?? 0,
-                'total_trucks' => $stats->total_trucks ?? 0,
-                'total_humans' => $stats->total_humans ?? 0,
-                'total_bikes' => $stats->total_bikes ?? 0,
-                'total_objects' => $stats->total_objects ?? 0,
-            ];
-        }
-
-        // Return the summarized statistics as a JSON response
-        return response()->json($allCameraStats, 200);
-    }
-
-    public function getPeakHourAndCameraStats(Request $request)
-    {
-        // Fetch all unique scenarios
-        $scenarios = CameraTraffic::select('scenario_name')
-            ->distinct()
-            ->pluck('scenario_name');
-
-        // Prepare the array to store peak hours data
-        $peakHoursData = [];
-
-        // For each scenario, calculate the hour with the highest total_objects
-        foreach ($scenarios as $scenario) {
-
-            $scenarioPeakTraffic = CameraTraffic::where('scenario_name', $scenario)
-                ->orderBy('total_count', 'desc') // Order by total_objects to get the peak hour
-                ->first(); // Get the record with the highest total_objects
-
-
-            // Find the traffic record with the maximum total_count for each scenario
-            // $scenarioTraffic = CameraTraffic::where('scenario_name', $scenario)
-            //     ->select(
-            //         'time',  // We need the time field for the datetime
-            //         DB::raw('HOUR(time) as hour'),
-            //         DB::raw('SUM(total_count) as total_objects')
-            //     )
-            //     ->groupBy(DB::raw('HOUR(time)'))
-            //     ->orderBy('total_objects', 'desc')  // Order by total_objects to get the peak hour
-            //     ->get();
-
-            $peakHoursData[] = [
-                'scenario' => $scenario,
-                'total_count' => $scenarioPeakTraffic->total_count,
-                'datetime' => $scenarioPeakTraffic->time, // Include the time field as datetime
-            ];
-        }
-
-        // Total objects grouped by camera (cam_ip)
-        $cameraObjects = CameraTraffic::select(
-            'cam_ip',
-            DB::raw('SUM(total_count) as total_objects')
-        )
-            ->groupBy('cam_ip')
+        // Get the peak record (max total_count) for each scenario in the selected camera and date range
+        $scenarioPeaks = CameraTraffic::where('cam_name', $camera->cam_name)
+            ->where('cam_ip', $camera->cam_ip)
+            ->select('scenario_name', DB::raw('MAX(total_count) as peak_count'))
+            ->when($startTime && $endTime, function ($q) use ($startTime, $endTime) {
+                $q->whereBetween('time', [$startTime, $endTime]);
+            })
+            ->groupBy('scenario_name')
             ->get();
 
-        // Prepare camera objects data in the format [{"cam_ip", "total_objects"}]
-        $formattedCameraObjects = $cameraObjects->map(function ($data) {
+        // Find the corresponding times for peak counts for each scenario
+        $scenarioPeakTimes = CameraTraffic::where('cam_name', $camera->cam_name)
+            ->where('cam_ip', $camera->cam_ip)
+            ->when($startTime && $endTime, function ($q) use ($startTime, $endTime) {
+                $q->whereBetween('time', [$startTime, $endTime]);
+            })
+            ->whereIn('scenario_name', $scenarioPeaks->pluck('scenario_name'))
+            ->get();
+
+        // Map the scenario peaks to include the time for the peak count
+        $formattedScenarioPeaks = $scenarioPeaks->map(function ($peak) use ($scenarioPeakTimes) {
+            $peakTime = $scenarioPeakTimes->where('scenario_name', $peak->scenario_name)
+                ->where('total_count', $peak->peak_count)
+                ->first();
+
             return [
-                'cam_ip' => $data->cam_ip,
-                'total_objects' => $data->total_objects,
+                'scenario' => $peak->scenario_name,
+                'time' => $peakTime->time ?? null,
+                'count' => $peak->peak_count
             ];
         });
 
-        // Return the peak hour data and total objects for each camera
-        return response()->json([
-            'peak_hours' => $peakHoursData,
-            'cameras' => $formattedCameraObjects
-        ], 200);
+        // Find the global peak (max count from all scenario peaks)
+        $totalPeak = $formattedScenarioPeaks->sortByDesc('count')->first();
+
+        // Analyze hourly peaks for each scenario
+        $timePeaks = [];
+        $scenarios = CameraTraffic::distinct()->pluck('scenario_name');
+
+        foreach ($scenarios as $scenario) {
+            $peaks = [];
+
+            // Loop through each hour (0:00 - 23:00)
+            for ($hour = 0; $hour < 24; $hour++) {
+                // Get the time range for the current hour
+                $startHour = sprintf('%02d:00', $hour);
+                $endHour = sprintf('%02d:00', ($hour + 1) % 24);
+
+                // Filter records for the current scenario, camera, and time range
+                $hourlyTraffic = CameraTraffic::where('cam_name', $camera->cam_name)
+                    ->where('cam_ip', $camera->cam_ip)
+                    ->where('scenario_name', $scenario)
+                    ->whereTime('time', '>=', $startHour)
+                    ->whereTime('time', '<', $endHour)
+                    ->when($startTime && $endTime, function ($q) use ($startTime, $endTime) {
+                        $q->whereBetween('time', [$startTime, $endTime]);
+                    })
+                    ->orderBy('total_count', 'desc') // Order by total_count to get the peak within the hour
+                    ->first();
+
+                // If there are records in this time range, add the maximum count
+                if ($hourlyTraffic) {
+                    $peaks["$startHour~$endHour"] = $hourlyTraffic->total_count;
+                } else {
+                    // If no data, use 0
+                    $peaks["$startHour~$endHour"] = 0;
+                }
+            }
+
+            // Add the hourly peaks to the timePeaks array for the current scenario
+            $timePeaks[] = [
+                'scenario' => $scenario,
+                'peaks' => $peaks
+            ];
+        }
+
+        // Structure the final response with time peaks included
+        $response = [
+            'camera_name' => $camera->cam_name,
+            'camera_ip' => $camera->cam_ip,
+            'total_cars' => $totals->total_cars ?? 0,
+            'total_buses' => $totals->total_buses ?? 0,
+            'total_trucks' => $totals->total_trucks ?? 0,
+            'total_humans' => $totals->total_humans ?? 0,
+            'total_bikes' => $totals->total_bikes ?? 0,
+            'total_objects' => $totals->total_objects ?? 0,
+            'peak' => [
+                'scenario' => $totalPeak['scenario'],
+                'time' => $totalPeak['time'],
+                'count' => $totalPeak['count'],
+            ],
+            'scenario_peaks' => $formattedScenarioPeaks,
+            'time_peaks' => $timePeaks
+        ];
+
+        // Return the response in JSON format
+        return response()->json($response, 200);
     }
 
 }
