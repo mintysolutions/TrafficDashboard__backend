@@ -39,7 +39,6 @@ class CountCameraController extends Controller
     }
 
     // Fetch stats for the selected camera
-
     public function getCameraStats(Request $request, $cameraId)
     {
         // Validate that the camera exists
@@ -54,7 +53,7 @@ class CountCameraController extends Controller
 
         // Initialize query for camera traffic data filtering by camera name, IP, and optional date range
         $query = CameraTraffic::where('cam_name', $camera->cam_name)
-            ->where('cam_ip', $camera->cam_ip);
+            ->where('cam_ip', operator: $camera->cam_ip);
 
         // Apply date range filter if start and end times are provided
         if ($startTime && $endTime) {
@@ -158,9 +157,9 @@ class CountCameraController extends Controller
             'total_bikes' => $totals->total_bikes ?? 0,
             'total_objects' => $totals->total_objects ?? 0,
             'peak' => [
-                'scenario' => $totalPeak['scenario'],
-                'time' => $totalPeak['time'],
-                'count' => $totalPeak['count'],
+                'scenario' => $totalPeak['scenario'] ?? 'N/A',
+                'time' => $totalPeak['time'] ?? 'N/A',
+                'count' => $totalPeak['count'] ?? 'N/A',
             ],
             'scenario_peaks' => $formattedScenarioPeaks,
             'time_peaks' => $timePeaks
